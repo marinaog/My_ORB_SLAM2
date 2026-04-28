@@ -25,6 +25,10 @@
 #include<chrono>
 
 #include<opencv2/core/core.hpp>
+#include<opencv2/imgproc/types_c.h>
+#include<opencv2/imgcodecs.hpp>
+#include<unistd.h>
+#include<sys/stat.h>
 
 #include<System.h>
 
@@ -33,13 +37,24 @@ using namespace std;
 void LoadImages(const string &strFile, vector<string> &vstrImageFilenames,
                 vector<double> &vTimestamps);
 
+static void mkdirp(const string &path)
+{
+    for(size_t i = 1; i <= path.size(); ++i)
+        if(i == path.size() || path[i] == '/')
+            mkdir(path.substr(0, i).c_str(), 0755);
+}
+
 int main(int argc, char **argv)
 {
-    if(argc != 4)
+    if(argc != 4 && argc != 5)
     {
-        cerr << endl << "Usage: ./mono_tum path_to_vocabulary path_to_settings path_to_sequence" << endl;
+        cerr << endl << "Usage: ./mono_tum path_to_vocabulary path_to_settings path_to_sequence [output_dir]" << endl;
         return 1;
     }
+
+    string outputDir = (argc == 5) ? string(argv[4]) : ".";
+    if(argc == 5)
+        mkdirp(outputDir);
 
     // Retrieve paths to images
     vector<string> vstrImageFilenames;
@@ -50,7 +65,7 @@ int main(int argc, char **argv)
     int nImages = vstrImageFilenames.size();
 
     // Create SLAM system. It initializes all system threads and gets ready to process frames.
-    ORB_SLAM2::System SLAM(argv[1],argv[2],ORB_SLAM2::System::MONOCULAR,true);
+    ORB_SLAM2::System SLAM(argv[1],argv[2],ORB_SLAM2::System::MONOCULAR,false);
 
     // Vector for tracking time statistics
     vector<float> vTimesTrack;
@@ -65,7 +80,7 @@ int main(int argc, char **argv)
     for(int ni=0; ni<nImages; ni++)
     {
         // Read image from file
-        im = cv::imread(string(argv[3])+"/"+vstrImageFilenames[ni],CV_LOAD_IMAGE_UNCHANGED);
+        im = cv::imread(string(argv[3])+"/"+vstrImageFilenames[ni],cv::IMREAD_UNCHANGED);
         double tframe = vTimestamps[ni];
 
         if(im.empty())
@@ -120,7 +135,7 @@ int main(int argc, char **argv)
     cout << "mean tracking time: " << totaltime/nImages << endl;
 
     // Save camera trajectory
-    SLAM.SaveKeyFrameTrajectoryTUM("KeyFrameTrajectory.txt");
+    SLAM.SaveKeyFrameTrajectoryTUM(outputDir + "/KeyFrameTrajectory.txt");
 
     return 0;
 }
