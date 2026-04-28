@@ -23,6 +23,8 @@
 #include<algorithm>
 #include<fstream>
 #include<chrono>
+#include<iomanip>
+#include<sstream>
 
 #include<opencv2/core/core.hpp>
 #include<opencv2/imgcodecs.hpp>
@@ -89,9 +91,10 @@ int main(int argc, char **argv)
 
     // Main loop
     cv::Mat imRGB, imD;
+    bool bIs16bit = false;
     for(int ni=0; ni<nImages; ni++)
     {
-        // Read image and depthmap from file
+        // Read image and depthmap from file — IMREAD_UNCHANGED preserves 16-bit HDR data
         imRGB = cv::imread(string(argv[3])+"/"+vstrImageFilenamesRGB[ni],cv::IMREAD_UNCHANGED);
         imD = cv::imread(string(argv[3])+"/"+vstrImageFilenamesD[ni],cv::IMREAD_UNCHANGED);
         double tframe = vTimestamps[ni];
@@ -101,6 +104,41 @@ int main(int argc, char **argv)
             cerr << endl << "Failed to load image at: "
                  << string(argv[3]) << "/" << vstrImageFilenamesRGB[ni] << endl;
             return 1;
+        }
+
+        if(ni == 0)
+        {
+            bIs16bit = (imRGB.depth() == CV_16U);
+
+            const string depthStr = (imRGB.depth() == CV_8U)  ? "CV_8U"  :
+                                    (imRGB.depth() == CV_16U) ? "CV_16U" :
+                                    (imRGB.depth() == CV_32F) ? "CV_32F" : "unknown";
+
+            // Compute actual pixel value range on one channel to confirm the
+            // full 16-bit range is present (not silently clamped to 0-255).
+            cv::Mat ch0;
+            if (imRGB.channels() > 1)
+                cv::extractChannel(imRGB, ch0, 0);
+            else
+                ch0 = imRGB;
+            double minVal, maxVal;
+            cv::minMaxLoc(ch0, &minVal, &maxVal);
+
+            cout << "\n[Image check] Path : " << string(argv[3]) << "/" << vstrImageFilenamesRGB[ni] << endl;
+            cout << "[Image check] Type : " << depthStr << "C" << imRGB.channels()
+                 << "  (" << imRGB.cols << "x" << imRGB.rows << ")" << endl;
+            cout << "[Image check] Range: [" << minVal << ", " << maxVal << "]"
+                 << "  (16-bit max = 65535)" << endl;
+
+            if (!bIs16bit)
+                cerr << "[Image check] WARNING: expected CV_16U but image loaded as " << depthStr
+                     << " — check that the file is a true 16-bit PNG and imread used IMREAD_UNCHANGED\n";
+            else if (maxVal <= 255.0)
+                cerr << "[Image check] WARNING: image is CV_16U but max pixel = " << maxVal
+                     << " — values look clamped to 8-bit range; verify the source PNG is genuinely 16-bit\n";
+            else
+                cout << "[Image check] OK: 16-bit HDR data confirmed.\n";
+            cout << endl;
         }
 
 #ifdef COMPILEDWITHC11
@@ -121,6 +159,30 @@ int main(int argc, char **argv)
         double ttrack= std::chrono::duration_cast<std::chrono::duration<double> >(t2 - t1).count();
 
         vTimesTrack[ni]=ttrack;
+
+        // Progress bar on stderr so it doesn't mix with SLAM's stdout messages.
+        {
+            const int barW = 35;
+            float pct = (float)(ni + 1) / nImages;
+            int filled = (int)(pct * barW);
+
+            // Cumulative average tracking time -> ETA
+            double cumTime = 0;
+            for (int k = 0; k <= ni; ++k) cumTime += vTimesTrack[k];
+            double avgTime = cumTime / (ni + 1);
+            int etaSec = (int)(avgTime * (nImages - ni - 1));
+
+            std::ostringstream bar;
+            bar << "\r  [" << std::setw(5) << (ni+1) << "/" << nImages << "] [";
+            for (int b = 0; b < barW; ++b)
+                bar << (b < filled ? '=' : (b == filled ? '>' : ' '));
+            bar << "] " << std::fixed << std::setprecision(0) << (pct * 100) << "%"
+                << "  " << std::setprecision(2) << avgTime << "s/frame"
+                << "  ETA " << etaSec/60 << "m" << std::setw(2) << std::setfill('0') << etaSec%60 << "s"
+                << std::setfill(' ');
+            std::cerr << bar.str() << std::flush;
+            if (ni == nImages - 1) std::cerr << "\n";
+        }
 
         // Wait to load the next frame
         double T=0;

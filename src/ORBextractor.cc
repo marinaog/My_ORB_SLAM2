@@ -78,26 +78,47 @@ static float IC_Angle(const Mat& image, Point2f pt,  const vector<int> & u_max)
 {
     int m_01 = 0, m_10 = 0;
 
-    const uchar* center = &image.at<uchar> (cvRound(pt.y), cvRound(pt.x));
+    // step1() returns elements-per-row for any depth, so pointer arithmetic is correct
+    // whether center is uchar* (8-bit) or uint16_t* (16-bit).
+    const int step = (int)image.step1();
 
-    // Treat the center line differently, v=0
-    for (int u = -HALF_PATCH_SIZE; u <= HALF_PATCH_SIZE; ++u)
-        m_10 += u * center[u];
-
-    // Go line by line in the circuI853lar patch
-    int step = (int)image.step1();
-    for (int v = 1; v <= HALF_PATCH_SIZE; ++v)
+    if (image.depth() == CV_16U)
     {
-        // Proceed over the two lines
-        int v_sum = 0;
-        int d = u_max[v];
-        for (int u = -d; u <= d; ++u)
+        const uint16_t* center = &image.at<uint16_t>(cvRound(pt.y), cvRound(pt.x));
+        for (int u = -HALF_PATCH_SIZE; u <= HALF_PATCH_SIZE; ++u)
+            m_10 += u * (int)center[u];
+        for (int v = 1; v <= HALF_PATCH_SIZE; ++v)
         {
-            int val_plus = center[u + v*step], val_minus = center[u - v*step];
-            v_sum += (val_plus - val_minus);
-            m_10 += u * (val_plus + val_minus);
+            int v_sum = 0;
+            int d = u_max[v];
+            for (int u = -d; u <= d; ++u)
+            {
+                int val_plus  = (int)center[u + v*step];
+                int val_minus = (int)center[u - v*step];
+                v_sum += (val_plus - val_minus);
+                m_10  += u * (val_plus + val_minus);
+            }
+            m_01 += v * v_sum;
         }
-        m_01 += v * v_sum;
+    }
+    else
+    {
+        const uchar* center = &image.at<uchar>(cvRound(pt.y), cvRound(pt.x));
+        for (int u = -HALF_PATCH_SIZE; u <= HALF_PATCH_SIZE; ++u)
+            m_10 += u * center[u];
+        for (int v = 1; v <= HALF_PATCH_SIZE; ++v)
+        {
+            int v_sum = 0;
+            int d = u_max[v];
+            for (int u = -d; u <= d; ++u)
+            {
+                int val_plus  = center[u + v*step];
+                int val_minus = center[u - v*step];
+                v_sum += (val_plus - val_minus);
+                m_10  += u * (val_plus + val_minus);
+            }
+            m_01 += v * v_sum;
+        }
     }
 
     return fastAtan2((float)m_01, (float)m_10);
@@ -105,6 +126,33 @@ static float IC_Angle(const Mat& image, Point2f pt,  const vector<int> & u_max)
 
 
 const float factorPI = (float)(CV_PI/180.f);
+
+// Shared body for computeOrbDescriptor — pixel type dispatched by caller macro.
+// Binary comparisons (t0 < t1) are ordering-based and work identically for
+// uint8_t and uint16_t, so the 32-byte ORB descriptor is produced the same way.
+#define ORB_DESCRIPTOR_BODY(GET_VALUE)                     \
+    for (int i = 0; i < 32; ++i, pattern += 16)           \
+    {                                                       \
+        int t0, t1, val;                                   \
+        t0 = GET_VALUE(0);  t1 = GET_VALUE(1);            \
+        val = t0 < t1;                                     \
+        t0 = GET_VALUE(2);  t1 = GET_VALUE(3);            \
+        val |= (t0 < t1) << 1;                            \
+        t0 = GET_VALUE(4);  t1 = GET_VALUE(5);            \
+        val |= (t0 < t1) << 2;                            \
+        t0 = GET_VALUE(6);  t1 = GET_VALUE(7);            \
+        val |= (t0 < t1) << 3;                            \
+        t0 = GET_VALUE(8);  t1 = GET_VALUE(9);            \
+        val |= (t0 < t1) << 4;                            \
+        t0 = GET_VALUE(10); t1 = GET_VALUE(11);           \
+        val |= (t0 < t1) << 5;                            \
+        t0 = GET_VALUE(12); t1 = GET_VALUE(13);           \
+        val |= (t0 < t1) << 6;                            \
+        t0 = GET_VALUE(14); t1 = GET_VALUE(15);           \
+        val |= (t0 < t1) << 7;                            \
+        desc[i] = (uchar)val;                             \
+    }
+
 static void computeOrbDescriptor(const KeyPoint& kpt,
                                  const Mat& img, const Point* pattern,
                                  uchar* desc)
@@ -112,39 +160,37 @@ static void computeOrbDescriptor(const KeyPoint& kpt,
     float angle = (float)kpt.angle*factorPI;
     float a = (float)cos(angle), b = (float)sin(angle);
 
-    const uchar* center = &img.at<uchar>(cvRound(kpt.pt.y), cvRound(kpt.pt.x));
-    const int step = (int)img.step;
-
-    #define GET_VALUE(idx) \
-        center[cvRound(pattern[idx].x*b + pattern[idx].y*a)*step + \
-               cvRound(pattern[idx].x*a - pattern[idx].y*b)]
-
-
-    for (int i = 0; i < 32; ++i, pattern += 16)
+    if (img.depth() == CV_16U)
     {
-        int t0, t1, val;
-        t0 = GET_VALUE(0); t1 = GET_VALUE(1);
-        val = t0 < t1;
-        t0 = GET_VALUE(2); t1 = GET_VALUE(3);
-        val |= (t0 < t1) << 1;
-        t0 = GET_VALUE(4); t1 = GET_VALUE(5);
-        val |= (t0 < t1) << 2;
-        t0 = GET_VALUE(6); t1 = GET_VALUE(7);
-        val |= (t0 < t1) << 3;
-        t0 = GET_VALUE(8); t1 = GET_VALUE(9);
-        val |= (t0 < t1) << 4;
-        t0 = GET_VALUE(10); t1 = GET_VALUE(11);
-        val |= (t0 < t1) << 5;
-        t0 = GET_VALUE(12); t1 = GET_VALUE(13);
-        val |= (t0 < t1) << 6;
-        t0 = GET_VALUE(14); t1 = GET_VALUE(15);
-        val |= (t0 < t1) << 7;
+        // Keep full 16-bit precision: dark HDR pixels that differ by < 256
+        // would collapse to the same 8-bit value and flip the binary test.
+        const uint16_t* center = &img.at<uint16_t>(cvRound(kpt.pt.y), cvRound(kpt.pt.x));
+        const int step = (int)img.step1(); // elements per row (not bytes)
 
-        desc[i] = (uchar)val;
+        #define GET_VALUE(idx) \
+            center[cvRound(pattern[idx].x*b + pattern[idx].y*a)*step + \
+                   cvRound(pattern[idx].x*a - pattern[idx].y*b)]
+
+        ORB_DESCRIPTOR_BODY(GET_VALUE)
+
+        #undef GET_VALUE
     }
+    else
+    {
+        const uchar* center = &img.at<uchar>(cvRound(kpt.pt.y), cvRound(kpt.pt.x));
+        const int step = (int)img.step; // bytes per row == elements per row for CV_8U
 
-    #undef GET_VALUE
+        #define GET_VALUE(idx) \
+            center[cvRound(pattern[idx].x*b + pattern[idx].y*a)*step + \
+                   cvRound(pattern[idx].x*a - pattern[idx].y*b)]
+
+        ORB_DESCRIPTOR_BODY(GET_VALUE)
+
+        #undef GET_VALUE
+    }
 }
+
+#undef ORB_DESCRIPTOR_BODY
 
 
 static int bit_pattern_31_[256*4] =
@@ -786,6 +832,11 @@ void ORBextractor::ComputeKeyPointsOctTree(vector<vector<KeyPoint> >& allKeypoin
         const int wCell = ceil(width/nCols);
         const int hCell = ceil(height/nRows);
 
+        // FAST requires CV_8UC1; for 16-bit pyramids convert each cell to 8-bit.
+        // Dividing by 256 maps [0,65535]→[0,255], preserving local contrast for
+        // corner detection — equivalent to scaling thresholds by 65535/255 ≈ 257.
+        const bool is16bit = (mvImagePyramid[level].depth() == CV_16U);
+
         for(int i=0; i<nRows; i++)
         {
             const float iniY =minBorderY+i*hCell;
@@ -805,14 +856,19 @@ void ORBextractor::ComputeKeyPointsOctTree(vector<vector<KeyPoint> >& allKeypoin
                 if(maxX>maxBorderX)
                     maxX = maxBorderX;
 
+                Mat cellROI = mvImagePyramid[level].rowRange(iniY,maxY).colRange(iniX,maxX);
+                Mat cellImg;
+                if (is16bit)
+                    cellROI.convertTo(cellImg, CV_8U, 1.0 / 256.0);
+                else
+                    cellImg = cellROI;
+
                 vector<cv::KeyPoint> vKeysCell;
-                FAST(mvImagePyramid[level].rowRange(iniY,maxY).colRange(iniX,maxX),
-                     vKeysCell,iniThFAST,true);
+                FAST(cellImg, vKeysCell, iniThFAST, true);
 
                 if(vKeysCell.empty())
                 {
-                    FAST(mvImagePyramid[level].rowRange(iniY,maxY).colRange(iniX,maxX),
-                         vKeysCell,minThFAST,true);
+                    FAST(cellImg, vKeysCell, minThFAST, true);
                 }
 
                 if(!vKeysCell.empty())
@@ -888,6 +944,7 @@ void ORBextractor::ComputeKeyPointsOld(std::vector<std::vector<KeyPoint> > &allK
         int nNoMore = 0;
         int nToDistribute = 0;
 
+        const bool is16bit = (mvImagePyramid[level].depth() == CV_16U);
 
         float hY = cellH + 6;
 
@@ -927,8 +984,12 @@ void ORBextractor::ComputeKeyPointsOld(std::vector<std::vector<KeyPoint> > &allK
                         continue;
                 }
 
-
-                Mat cellImage = mvImagePyramid[level].rowRange(iniY,iniY+hY).colRange(iniX,iniX+hX);
+                Mat cellROI = mvImagePyramid[level].rowRange(iniY,iniY+hY).colRange(iniX,iniX+hX);
+                Mat cellImage;
+                if (is16bit)
+                    cellROI.convertTo(cellImage, CV_8U, 1.0 / 256.0);
+                else
+                    cellImage = cellROI;
 
                 cellKeyPoints[i][j].reserve(nfeaturesCell*5);
 
@@ -1042,14 +1103,14 @@ static void computeDescriptors(const Mat& image, vector<KeyPoint>& keypoints, Ma
 
 void ORBextractor::operator()( InputArray _image, InputArray _mask, vector<KeyPoint>& _keypoints,
                       OutputArray _descriptors)
-{ 
+{
     if(_image.empty())
         return;
 
     Mat image = _image.getMat();
-    assert(image.type() == CV_8UC1 );
+    assert(image.type() == CV_8UC1 || image.type() == CV_16UC1);
 
-    // Pre-compute the scale pyramid
+    // Pre-compute the scale pyramid (preserves bit-depth for accurate downsampling)
     ComputePyramid(image);
 
     vector < vector<KeyPoint> > allKeypoints;
@@ -1085,7 +1146,8 @@ void ORBextractor::operator()( InputArray _image, InputArray _mask, vector<KeyPo
         Mat workingMat = mvImagePyramid[level].clone();
         GaussianBlur(workingMat, workingMat, Size(7, 7), 2, 2, BORDER_REFLECT_101);
 
-        // Compute the descriptors
+        // computeOrbDescriptor handles both CV_8UC1 and CV_16UC1 natively,
+        // so no downconversion needed — full dynamic range is preserved.
         Mat desc = descriptors.rowRange(offset, offset + nkeypointsLevel);
         computeDescriptors(workingMat, keypoints, desc, pattern);
 
