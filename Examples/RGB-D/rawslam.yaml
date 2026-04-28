@@ -1,0 +1,62 @@
+%YAML:1.0
+
+#--------------------------------------------------------------------------------------------
+# Camera Parameters for the RawSLAM dataset (bottles / coat_rack / boxes scenes).
+# Intrinsics sourced from datasets/rawslam/*/my_dataset.yaml.
+# depth_scale = 0.001  ->  DepthMapFactor = 1000.0
+#--------------------------------------------------------------------------------------------
+
+Camera.fx: 1380.380371
+Camera.fy: 1379.299072
+Camera.cx: 961.569458
+Camera.cy: 568.119446
+
+# RawSLAM depth images are undistorted (all distortion coefficients are 0)
+Camera.k1: 0.0
+Camera.k2: 0.0
+Camera.p1: 0.0
+Camera.p2: 0.0
+Camera.k3: 0.0
+
+Camera.width: 1920
+Camera.height: 1080
+
+# Camera frames per second
+Camera.fps: 30.0
+
+# IR projector baseline times fx (scaled proportionally from TUM1: bf/fx ~ 0.077)
+Camera.bf: 107.0
+
+# Color order of the images (0: BGR, 1: RGB)
+Camera.RGB: 1
+
+# Close/Far threshold in baseline multiples (~3 m at this bf/fx ratio)
+ThDepth: 40.0
+
+# Depth map scale factor: pixel_value / DepthMapFactor = depth in metres
+# RawSLAM depth PNGs use depth_scale = 0.001, so DepthMapFactor = 1000.0
+RGBD.DepthMapFactor: 1000.0
+
+#--------------------------------------------------------------------------------------------
+# ORB Parameters
+#--------------------------------------------------------------------------------------------
+
+ORBextractor.nFeatures: 1000
+ORBextractor.scaleFactor: 1.2
+ORBextractor.nLevels: 8
+ORBextractor.iniThFAST: 20
+ORBextractor.minThFAST: 7
+
+#--------------------------------------------------------------------------------------------
+# Viewer Parameters
+#--------------------------------------------------------------------------------------------
+Viewer.KeyFrameSize: 0.05
+Viewer.KeyFrameLineWidth: 1
+Viewer.GraphLineWidth: 0.9
+Viewer.PointSize: 2
+Viewer.CameraSize: 0.08
+Viewer.CameraLineWidth: 3
+Viewer.ViewpointX: 0
+Viewer.ViewpointY: -0.7
+Viewer.ViewpointZ: -1.8
+Viewer.ViewpointF: 500
